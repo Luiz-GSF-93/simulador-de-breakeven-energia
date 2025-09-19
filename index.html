@@ -2,217 +2,184 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Simulador de Breakeven de Energia</title>
-  <!-- Tailwind via CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React + ReactDOM -->
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-  <!-- Babel para JSX no navegador -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <!-- Recharts -->
-  <script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
-  <!-- html2canvas e jsPDF -->
-  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <!-- Lucide icons -->
-  <script src="https://unpkg.com/lucide-react/dist/lucide-react.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <style>
+    body { background:#111827; color:#f9fafb; font-family:sans-serif; margin:0; padding:20px; }
+    h1 { font-size:1.5rem; margin-bottom:10px; }
+    .container { display:grid; grid-template-columns:1fr 2fr; gap:20px; }
+    .card { background:#1f2937; padding:15px; border-radius:10px; }
+    label { font-size:0.9rem; display:block; margin-top:10px; }
+    input { width:100%; padding:5px; border-radius:5px; border:none; background:#374151; color:white; }
+    table { width:100%; border-collapse:collapse; font-size:0.9rem; }
+    th, td { padding:6px; border-bottom:1px solid #374151; }
+    th { color:#9ca3af; }
+    .btn { background:#4f46e5; color:white; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; }
+    .kpis { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:20px; }
+    .kpi { background:#374151; padding:10px; border-radius:8px; text-align:center; }
+    .kpi div:first-child { font-size:0.8rem; color:#9ca3af; }
+    .kpi div:last-child { font-size:1.2rem; font-weight:bold; }
+  </style>
 </head>
-<body class="bg-gray-900 text-gray-100">
-  <div id="root"></div>
+<body>
+  <h1>⚡ Simulador de Breakeven de Energia</h1>
+  <p style="color:#9ca3af;">Calcule o melhor momento para comprar energia antecipada com base em projeções e inflação.</p>
+  <button class="btn" onclick="gerarPDF()">📄 Exportar PDF</button>
 
-  <script type="text/babel">
+  <div class="container" id="simulador">
+    <!-- Entradas -->
+    <div class="card">
+      <h2>Entradas</h2>
+      <label>Preço ofertado (R$/kWh)</label>
+      <input type="number" id="offeredPrice" value="0.55" step="0.001">
 
-const { useState, useMemo, useRef } = React;
-const { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } = Recharts;
-const { jsPDF } = window.jspdf;
+      <label>Duração do contrato (meses)</label>
+      <input type="number" id="contractMonths" value="12">
 
-function EnergyBreakevenSimulator() {
-  const defaultMonthly = [800, 760, 720, 700, 680, 650, 640, 660, 700, 750, 780, 820];
-  const [monthlyConsumption, setMonthlyConsumption] = useState(defaultMonthly);
-  const [offeredPrice, setOfferedPrice] = useState(0.55);
-  const [contractMonths, setContractMonths] = useState(12);
-  const [projectedPriceByYear, setProjectedPriceByYear] = useState([0.60, 0.63, 0.66, 0.69, 0.72]);
-  const [inflationByYear, setInflationByYear] = useState([0.05, 0.045, 0.04, 0.04, 0.035]);
-  const containerRef = useRef(null);
+      <label>Projeção de preço por ano (R$/kWh)</label>
+      <div id="projYears"></div>
 
-  const monthNames = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+      <label>Inflação projetada por ano (decimal)</label>
+      <div id="inflYears"></div>
 
-  function getProjectedMarketPrice(monthsFromNow) {
-    const yearIndex = Math.min(Math.floor(monthsFromNow / 12), projectedPriceByYear.length - 1);
-    let base = projectedPriceByYear[yearIndex];
-    let cumulativeInflation = 1;
-    for (let y = 0; y <= yearIndex; y++) cumulativeInflation *= (1 + (inflationByYear[y] || 0));
-    return base * cumulativeInflation;
-  }
-
-  const monthAnalyses = useMemo(() => {
-    const results = [];
-    for (let buyMonth = 0; buyMonth < 12; buyMonth++) {
-      let totalBoughtCost = 0, totalNotBoughtCost = 0, totalKwhBought = 0;
-      for (let m = 0; m < contractMonths; m++) {
-        const consumedMonthIndex = (buyMonth + m) % 12;
-        const kwh = monthlyConsumption[consumedMonthIndex] || 0;
-        const marketPriceAtUse = getProjectedMarketPrice(m);
-        totalBoughtCost += kwh * offeredPrice;
-        totalNotBoughtCost += kwh * marketPriceAtUse;
-        totalKwhBought += kwh;
-      }
-      const savings = totalNotBoughtCost - totalBoughtCost;
-      const breakevenPrice = totalKwhBought > 0 ? (totalNotBoughtCost / totalKwhBought) : 0;
-      results.push({ buyMonth, totalBoughtCost, totalNotBoughtCost, savings, breakevenPrice, totalKwhBought });
-    }
-    return results;
-  }, [monthlyConsumption, offeredPrice, contractMonths, projectedPriceByYear, inflationByYear]);
-
-  const best = useMemo(() => {
-    const sorted = [...monthAnalyses].sort((a, b) => b.savings - a.savings);
-    return sorted[0] || { buyMonth: 0, savings: 0 };
-  }, [monthAnalyses]);
-
-  const chartData = monthAnalyses.map(item => ({
-    name: monthNames[item.buyMonth],
-    savings: Number(item.savings.toFixed(2)),
-    breakeven: Number(item.breakevenPrice.toFixed(3))
-  }));
-
-  const totalAnnualConsumption = monthlyConsumption.reduce((s, v) => s + Number(v || 0), 0);
-
-  function updateMonthly(index, value) {
-    const copy = [...monthlyConsumption];
-    copy[index] = Number(value || 0);
-    setMonthlyConsumption(copy);
-  }
-
-  function generatePDF() {
-    const input = containerRef.current;
-    if (!input) return;
-    html2canvas(input, { scale: 2 }).then(canvas => {
-      const imgData = canvas.toDataURL("image/png");
-      const pdf = new jsPDF("p", "mm", "a4");
-      pdf.addImage(imgData, "PNG", 0, 0, 210, 297);
-      pdf.save("simulador-breakeven-energia.pdf");
-    });
-  }
-
-  function stdDev(arr) {
-    const nums = arr.map(Number);
-    const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
-    const vari = nums.reduce((s, v) => s + (v - mean) * (v - mean), 0) / nums.length;
-    return Math.sqrt(vari || 0);
-  }
-
-  function riskAssessment() {
-    const priceStd = stdDev(projectedPriceByYear);
-    const inflStd = stdDev(inflationByYear);
-    const riskScore = Math.min(100, Math.round(priceStd * 100 + inflStd * 200));
-    let label = "Baixo";
-    if (riskScore > 60) label = "Alto";
-    else if (riskScore > 30) label = "Moderado";
-    return { riskScore, label };
-  }
-
-  const risk = riskAssessment();
-
-  return (
-    <div className="p-6 bg-gray-900 min-h-screen text-gray-100" ref={containerRef}>
-      <header className="mb-6 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">⚡ Simulador de Breakeven de Energia</h1>
-          <p className="text-sm text-gray-400">Calcule o melhor momento para comprar energia antecipada com base em projeções e inflação.</p>
-        </div>
-        <button onClick={generatePDF} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded shadow">
-          📄 Exportar PDF A4
-        </button>
-      </header>
-
-      <main className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <section className="col-span-1 bg-gray-800 p-4 rounded-lg shadow">
-          <h2 className="text-lg font-medium mb-2">Entradas</h2>
-          <div className="mb-4">
-            <label className="block text-sm text-gray-300">Preço ofertado (R$/kWh)</label>
-            <input type="number" step="0.001" value={offeredPrice} onChange={e => setOfferedPrice(Number(e.target.value))} className="w-full mt-1 p-2 rounded bg-gray-700 text-white" />
-          </div>
-          <div className="mb-4">
-            <label className="block text-sm text-gray-300">Duração do contrato (meses)</label>
-            <input type="number" value={contractMonths} onChange={e => setContractMonths(Number(e.target.value))} className="w-full mt-1 p-2 rounded bg-gray-700 text-white" />
-          </div>
-          <div className="mb-4">
-            <label className="block text-sm text-gray-300">Projeção de preço por ano (5 anos)</label>
-            <div className="grid grid-cols-5 gap-2 mt-2">
-              {projectedPriceByYear.map((p, i) => (
-                <input key={i} type="number" step="0.001" value={p} onChange={e => {
-                  const c = [...projectedPriceByYear]; c[i] = Number(e.target.value); setProjectedPriceByYear(c);
-                }} className="p-2 rounded bg-gray-700 text-white text-sm" />
-              ))}
-            </div>
-          </div>
-          <div className="mb-4">
-            <label className="block text-sm text-gray-300">Inflação projetada (5 anos)</label>
-            <div className="grid grid-cols-5 gap-2 mt-2">
-              {inflationByYear.map((p, i) => (
-                <input key={i} type="number" step="0.001" value={p} onChange={e => {
-                  const c = [...inflationByYear]; c[i] = Number(e.target.value); setInflationByYear(c);
-                }} className="p-2 rounded bg-gray-700 text-white text-sm" />
-              ))}
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm text-gray-300">Consumo mensal (kWh)</label>
-            <div className="grid grid-cols-3 gap-2 mt-2">
-              {monthlyConsumption.map((m, idx) => (
-                <div key={idx} className="flex flex-col">
-                  <label className="text-xs text-gray-400">{monthNames[idx]}</label>
-                  <input type="number" step="1" value={m} onChange={e => updateMonthly(idx, Number(e.target.value))} className="p-2 rounded bg-gray-700 text-white text-sm" />
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        <section className="col-span-1 lg:col-span-2 bg-gray-800 p-4 rounded-lg shadow">
-          <h2 className="text-lg font-medium mb-4">Resultados & KPIs</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <div className="bg-gray-700 p-3 rounded">
-              <div className="text-sm text-gray-300">Consumo anual (kWh)</div>
-              <div className="text-2xl font-semibold">{totalAnnualConsumption}</div>
-            </div>
-            <div className="bg-gray-700 p-3 rounded">
-              <div className="text-sm text-gray-300">Melhor mês para comprar</div>
-              <div className="text-2xl font-semibold">{monthNames[best.buyMonth]}</div>
-              <div className="text-sm text-green-300">Economia estimada: R$ {best.savings.toFixed(2)}</div>
-            </div>
-            <div className="bg-gray-700 p-3 rounded">
-              <div className="text-sm text-gray-300">Risco</div>
-              <div className="text-2xl font-semibold">{risk.label}</div>
-              <div className="text-sm text-gray-400">Score: {risk.riskScore}</div>
-            </div>
-          </div>
-
-          <div className="mb-4">
-            <h3 className="text-sm text-gray-300 mb-2">Breakeven e Economia</h3>
-            <div style={{ width: "100%", height: 300 }} className="bg-gray-900 p-2 rounded">
-              <ResponsiveContainer width="100%" height={280}>
-                <LineChart data={chartData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
-                  <XAxis dataKey="name" />
-                  <YAxis />
-                  <Tooltip />
-                  <Line type="monotone" dataKey="breakeven" stroke="#60a5fa" strokeWidth={2} />
-                  <Line type="monotone" dataKey="savings" stroke="#34d399" strokeWidth={2} />
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          </div>
-        </section>
-      </main>
+      <label>Consumo mensal (kWh)</label>
+      <div id="monthlyInputs"></div>
     </div>
-  );
-}
 
-ReactDOM.createRoot(document.getElementById("root")).render(<EnergyBreakevenSimulator />);
+    <!-- Resultados -->
+    <div class="card">
+      <h2>Resultados & KPIs</h2>
+      <div class="kpis">
+        <div class="kpi"><div>Consumo anual</div><div id="kpiConsumo">0</div></div>
+        <div class="kpi"><div>Melhor mês</div><div id="kpiMes">-</div></div>
+        <div class="kpi"><div>Risco</div><div id="kpiRisco">-</div></div>
+      </div>
 
+      <canvas id="grafico" height="150"></canvas>
+
+      <h3>Detalhes por mês</h3>
+      <div style="max-height:200px; overflow:auto;">
+        <table>
+          <thead><tr><th>Mês</th><th>Breakeven</th><th>Economia</th><th>kWh</th></tr></thead>
+          <tbody id="tabela"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const meses = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+    let consumo = [800,760,720,700,680,650,640,660,700,750,780,820];
+    let projPreco = [0.60,0.63,0.66,0.69,0.72];
+    let inflacao = [0.05,0.045,0.04,0.04,0.035];
+    let chart;
+
+    // gerar inputs dinamicamente
+    function gerarInputs(){
+      const projDiv=document.getElementById("projYears"); projDiv.innerHTML="";
+      projPreco.forEach((v,i)=>{
+        const inp=document.createElement("input");
+        inp.type="number"; inp.value=v; inp.step="0.001";
+        inp.oninput=()=>{ projPreco[i]=parseFloat(inp.value)||0; calcular(); };
+        projDiv.appendChild(inp);
+      });
+
+      const inflDiv=document.getElementById("inflYears"); inflDiv.innerHTML="";
+      inflacao.forEach((v,i)=>{
+        const inp=document.createElement("input");
+        inp.type="number"; inp.value=v; inp.step="0.001";
+        inp.oninput=()=>{ inflacao[i]=parseFloat(inp.value)||0; calcular(); };
+        inflDiv.appendChild(inp);
+      });
+
+      const mDiv=document.getElementById("monthlyInputs"); mDiv.innerHTML="";
+      consumo.forEach((v,i)=>{
+        const inp=document.createElement("input");
+        inp.type="number"; inp.value=v;
+        inp.oninput=()=>{ consumo[i]=parseFloat(inp.value)||0; calcular(); };
+        mDiv.appendChild(inp);
+      });
+    }
+
+    function precoMercado(mesesFut){
+      const ano=Math.min(Math.floor(mesesFut/12),projPreco.length-1);
+      let base=projPreco[ano]; let cumul=1;
+      for(let y=0;y<=ano;y++) cumul*=(1+(inflacao[y]||0));
+      return base*cumul;
+    }
+
+    function calcular(){
+      const offered=parseFloat(document.getElementById("offeredPrice").value)||0;
+      const mesesContrato=parseInt(document.getElementById("contractMonths").value)||12;
+      let analises=[];
+      for(let buy=0;buy<12;buy++){
+        let totalBuy=0, totalNoBuy=0, totalKwh=0;
+        for(let m=0;m<mesesContrato;m++){
+          const idx=(buy+m)%12;
+          const kwh=consumo[idx];
+          const preco=precoMercado(m);
+          totalBuy+=kwh*offered;
+          totalNoBuy+=kwh*preco;
+          totalKwh+=kwh;
+        }
+        const savings=totalNoBuy-totalBuy;
+        const breakeven=totalKwh>0? totalNoBuy/totalKwh:0;
+        analises.push({mes:meses[buy], savings, breakeven, totalKwh});
+      }
+
+      // KPIs
+      const totalConsumo=consumo.reduce((a,b)=>a+b,0);
+      document.getElementById("kpiConsumo").innerText=totalConsumo;
+      const melhor=analises.reduce((a,b)=>a.savings>b.savings?a:b);
+      document.getElementById("kpiMes").innerText=melhor.mes;
+      const risco=avaliarRisco();
+      document.getElementById("kpiRisco").innerText=risco;
+
+      // tabela
+      const tbody=document.getElementById("tabela"); tbody.innerHTML="";
+      analises.forEach(r=>{
+        const tr=document.createElement("tr");
+        tr.innerHTML=`<td>${r.mes}</td><td>${r.breakeven.toFixed(3)}</td>
+                      <td style="color:${r.savings>=0?"#34d399":"#f87171"}">R$ ${r.savings.toFixed(2)}</td>
+                      <td>${r.totalKwh}</td>`;
+        tbody.appendChild(tr);
+      });
+
+      // gráfico
+      const ctx=document.getElementById("grafico").getContext("2d");
+      if(chart) chart.destroy();
+      chart=new Chart(ctx,{type:"line",
+        data:{labels:analises.map(r=>r.mes),
+              datasets:[
+                {label:"Breakeven (R$/kWh)",data:analises.map(r=>r.breakeven),borderColor:"#60a5fa",fill:false},
+                {label:"Economia (R$)",data:analises.map(r=>r.savings),borderColor:"#34d399",fill:false}
+              ]},
+        options:{responsive:true,plugins:{legend:{labels:{color:"white"}}},scales:{x:{ticks:{color:"white"}},y:{ticks:{color:"white"}}}}
+      });
+    }
+
+    function avaliarRisco(){
+      function std(arr){const m=arr.reduce((a,b)=>a+b,0)/arr.length;return Math.sqrt(arr.reduce((s,v)=>s+(v-m)*(v-m),0)/arr.length);}
+      const score=Math.round(std(projPreco)*100+std(inflacao)*200);
+      if(score>60) return "Alto"; if(score>30) return "Moderado"; return "Baixo";
+    }
+
+    async function gerarPDF(){
+      const el=document.getElementById("simulador");
+      const canvas=await html2canvas(el,{scale:2});
+      const img=canvas.toDataURL("image/png");
+      const pdf=new jspdf.jsPDF("p","mm","a4");
+      const w=pdf.internal.pageSize.getWidth();
+      const h=pdf.internal.pageSize.getHeight();
+      pdf.addImage(img,"PNG",0,0,w,h);
+      pdf.save("simulador.pdf");
+    }
+
+    gerarInputs();
+    calcular();
   </script>
 </body>
 </html>
