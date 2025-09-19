@@ -30,26 +30,20 @@
   <button class="btn" onclick="gerarPDF()">📄 Exportar PDF</button>
 
   <div class="container" id="simulador">
-    <!-- Entradas -->
     <div class="card">
       <h2>Entradas</h2>
       <label>Preço ofertado (R$/kWh)</label>
       <input type="number" id="offeredPrice" value="0.55" step="0.001">
-
       <label>Duração do contrato (meses)</label>
       <input type="number" id="contractMonths" value="12">
-
       <label>Projeção de preço por ano (R$/kWh)</label>
       <div id="projYears"></div>
-
       <label>Inflação projetada por ano (decimal)</label>
       <div id="inflYears"></div>
-
       <label>Consumo mensal (kWh)</label>
       <div id="monthlyInputs"></div>
     </div>
 
-    <!-- Resultados -->
     <div class="card">
       <h2>Resultados & KPIs</h2>
       <div class="kpis">
@@ -57,9 +51,7 @@
         <div class="kpi"><div>Melhor mês</div><div id="kpiMes">-</div></div>
         <div class="kpi"><div>Risco</div><div id="kpiRisco">-</div></div>
       </div>
-
       <canvas id="grafico" height="150"></canvas>
-
       <h3>Detalhes por mês</h3>
       <div style="max-height:200px; overflow:auto;">
         <table>
@@ -71,35 +63,32 @@
   </div>
 
   <script>
-    const meses = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
-    let consumo = [800,760,720,700,680,650,640,660,700,750,780,820];
-    let projPreco = [0.60,0.63,0.66,0.69,0.72];
-    let inflacao = [0.05,0.045,0.04,0.04,0.035];
+    const meses=["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+    let consumo=[800,760,720,700,680,650,640,660,700,750,780,820];
+    let projPreco=[0.60,0.63,0.66,0.69,0.72];
+    let inflacao=[0.05,0.045,0.04,0.04,0.035];
     let chart;
 
-    // gerar inputs dinamicamente
     function gerarInputs(){
       const projDiv=document.getElementById("projYears"); projDiv.innerHTML="";
       projPreco.forEach((v,i)=>{
         const inp=document.createElement("input");
         inp.type="number"; inp.value=v; inp.step="0.001";
-        inp.oninput=()=>{ projPreco[i]=parseFloat(inp.value)||0; calcular(); };
+        inp.oninput=()=>{projPreco[i]=parseFloat(inp.value)||0; calcular();};
         projDiv.appendChild(inp);
       });
-
       const inflDiv=document.getElementById("inflYears"); inflDiv.innerHTML="";
       inflacao.forEach((v,i)=>{
         const inp=document.createElement("input");
         inp.type="number"; inp.value=v; inp.step="0.001";
-        inp.oninput=()=>{ inflacao[i]=parseFloat(inp.value)||0; calcular(); };
+        inp.oninput=()=>{inflacao[i]=parseFloat(inp.value)||0; calcular();};
         inflDiv.appendChild(inp);
       });
-
       const mDiv=document.getElementById("monthlyInputs"); mDiv.innerHTML="";
       consumo.forEach((v,i)=>{
         const inp=document.createElement("input");
         inp.type="number"; inp.value=v;
-        inp.oninput=()=>{ consumo[i]=parseFloat(inp.value)||0; calcular(); };
+        inp.oninput=()=>{consumo[i]=parseFloat(inp.value)||0; calcular();};
         mDiv.appendChild(inp);
       });
     }
@@ -116,7 +105,7 @@
       const mesesContrato=parseInt(document.getElementById("contractMonths").value)||12;
       let analises=[];
       for(let buy=0;buy<12;buy++){
-        let totalBuy=0, totalNoBuy=0, totalKwh=0;
+        let totalBuy=0,totalNoBuy=0,totalKwh=0;
         for(let m=0;m<mesesContrato;m++){
           const idx=(buy+m)%12;
           const kwh=consumo[idx];
@@ -126,19 +115,14 @@
           totalKwh+=kwh;
         }
         const savings=totalNoBuy-totalBuy;
-        const breakeven=totalKwh>0? totalNoBuy/totalKwh:0;
-        analises.push({mes:meses[buy], savings, breakeven, totalKwh});
+        const breakeven=totalKwh>0?totalNoBuy/totalKwh:0;
+        analises.push({mes:meses[buy],savings,breakeven,totalKwh});
       }
-
-      // KPIs
       const totalConsumo=consumo.reduce((a,b)=>a+b,0);
       document.getElementById("kpiConsumo").innerText=totalConsumo;
       const melhor=analises.reduce((a,b)=>a.savings>b.savings?a:b);
       document.getElementById("kpiMes").innerText=melhor.mes;
-      const risco=avaliarRisco();
-      document.getElementById("kpiRisco").innerText=risco;
-
-      // tabela
+      document.getElementById("kpiRisco").innerText=avaliarRisco();
       const tbody=document.getElementById("tabela"); tbody.innerHTML="";
       analises.forEach(r=>{
         const tr=document.createElement("tr");
@@ -147,8 +131,6 @@
                       <td>${r.totalKwh}</td>`;
         tbody.appendChild(tr);
       });
-
-      // gráfico
       const ctx=document.getElementById("grafico").getContext("2d");
       if(chart) chart.destroy();
       chart=new Chart(ctx,{type:"line",
@@ -157,7 +139,8 @@
                 {label:"Breakeven (R$/kWh)",data:analises.map(r=>r.breakeven),borderColor:"#60a5fa",fill:false},
                 {label:"Economia (R$)",data:analises.map(r=>r.savings),borderColor:"#34d399",fill:false}
               ]},
-        options:{responsive:true,plugins:{legend:{labels:{color:"white"}}},scales:{x:{ticks:{color:"white"}},y:{ticks:{color:"white"}}}}
+        options:{responsive:true,plugins:{legend:{labels:{color:"white"}}},
+                 scales:{x:{ticks:{color:"white"}},y:{ticks:{color:"white"}}}}
       });
     }
 
