@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Simulador de Breakeven de Energia</title>
+  <!-- Tailwind via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React + ReactDOM -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <!-- Babel para JSX no navegador -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Recharts -->
+  <script src="https://unpkg.com/recharts/umd/Recharts.min.js"></script>
+  <!-- html2canvas e jsPDF -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- Lucide icons -->
+  <script src="https://unpkg.com/lucide-react/dist/lucide-react.min.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-100">
+  <div id="root"></div>
+
+  <script type="text/babel">
+
+const { useState, useMemo, useRef } = React;
+const { LineChart, Line, XAxis, YAxis, Tooltip, CartesianGrid, ResponsiveContainer } = Recharts;
+const { jsPDF } = window.jspdf;
+
+function EnergyBreakevenSimulator() {
+  const defaultMonthly = [800, 760, 720, 700, 680, 650, 640, 660, 700, 750, 780, 820];
+  const [monthlyConsumption, setMonthlyConsumption] = useState(defaultMonthly);
+  const [offeredPrice, setOfferedPrice] = useState(0.55);
+  const [contractMonths, setContractMonths] = useState(12);
+  const [projectedPriceByYear, setProjectedPriceByYear] = useState([0.60, 0.63, 0.66, 0.69, 0.72]);
+  const [inflationByYear, setInflationByYear] = useState([0.05, 0.045, 0.04, 0.04, 0.035]);
+  const containerRef = useRef(null);
+
+  const monthNames = ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"];
+
+  function getProjectedMarketPrice(monthsFromNow) {
+    const yearIndex = Math.min(Math.floor(monthsFromNow / 12), projectedPriceByYear.length - 1);
+    let base = projectedPriceByYear[yearIndex];
+    let cumulativeInflation = 1;
+    for (let y = 0; y <= yearIndex; y++) cumulativeInflation *= (1 + (inflationByYear[y] || 0));
+    return base * cumulativeInflation;
+  }
+
+  const monthAnalyses = useMemo(() => {
+    const results = [];
+    for (let buyMonth = 0; buyMonth < 12; buyMonth++) {
+      let totalBoughtCost = 0, totalNotBoughtCost = 0, totalKwhBought = 0;
+      for (let m = 0; m < contractMonths; m++) {
+        const consumedMonthIndex = (buyMonth + m) % 12;
+        const kwh = monthlyConsumption[consumedMonthIndex] || 0;
+        const marketPriceAtUse = getProjectedMarketPrice(m);
+        totalBoughtCost += kwh * offeredPrice;
+        totalNotBoughtCost += kwh * marketPriceAtUse;
+        totalKwhBought += kwh;
+      }
+      const savings = totalNotBoughtCost - totalBoughtCost;
+      const breakevenPrice = totalKwhBought > 0 ? (totalNotBoughtCost / totalKwhBought) : 0;
+      results.push({ buyMonth, totalBoughtCost, totalNotBoughtCost, savings, breakevenPrice, totalKwhBought });
+    }
+    return results;
+  }, [monthlyConsumption, offeredPrice, contractMonths, projectedPriceByYear, inflationByYear]);
+
+  const best = useMemo(() => {
+    const sorted = [...monthAnalyses].sort((a, b) => b.savings - a.savings);
+    return sorted[0] || { buyMonth: 0, savings: 0 };
+  }, [monthAnalyses]);
+
+  const chartData = monthAnalyses.map(item => ({
+    name: monthNames[item.buyMonth],
+    savings: Number(item.savings.toFixed(2)),
+    breakeven: Number(item.breakevenPrice.toFixed(3))
+  }));
+
+  const totalAnnualConsumption = monthlyConsumption.reduce((s, v) => s + Number(v || 0), 0);
+
+  function updateMonthly(index, value) {
+    const copy = [...monthlyConsumption];
+    copy[index] = Number(value || 0);
+    setMonthlyConsumption(copy);
+  }
+
+  function generatePDF() {
+    const input = containerRef.current;
+    if (!input) return;
+    html2canvas(input, { scale: 2 }).then(canvas => {
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF("p", "mm", "a4");
+      pdf.addImage(imgData, "PNG", 0, 0, 210, 297);
+      pdf.save("simulador-breakeven-energia.pdf");
+    });
+  }
+
+  function stdDev(arr) {
+    const nums = arr.map(Number);
+    const mean = nums.reduce((a, b) => a + b, 0) / nums.length;
+    const vari = nums.reduce((s, v) => s + (v - mean) * (v - mean), 0) / nums.length;
+    return Math.sqrt(vari || 0);
+  }
+
+  function riskAssessment() {
+    const priceStd = stdDev(projectedPriceByYear);
+    const inflStd = stdDev(inflationByYear);
+    const riskScore = Math.min(100, Math.round(priceStd * 100 + inflStd * 200));
+    let label = "Baixo";
+    if (riskScore > 60) label = "Alto";
+    else if (riskScore > 30) label = "Moderado";
+    return { riskScore, label };
+  }
+
+  const risk = riskAssessment();
+
+  return (
+    <div className="p-6 bg-gray-900 min-h-screen text-gray-100" ref={containerRef}>
+      <header className="mb-6 flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold flex items-center gap-2">⚡ Simulador de Breakeven de Energia</h1>
+          <p className="text-sm text-gray-400">Calcule o melhor momento para comprar energia antecipada com base em projeções e inflação.</p>
+        </div>
+        <button onClick={generatePDF} className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 px-4 py-2 rounded shadow">
+          📄 Exportar PDF A4
+        </button>
+      </header>
+
+      <main className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <section className="col-span-1 bg-gray-800 p-4 rounded-lg shadow">
+          <h2 className="text-lg font-medium mb-2">Entradas</h2>
+          <div className="mb-4">
+            <label className="block text-sm text-gray-300">Preço ofertado (R$/kWh)</label>
+            <input type="number" step="0.001" value={offeredPrice} onChange={e => setOfferedPrice(Number(e.target.value))} className="w-full mt-1 p-2 rounded bg-gray-700 text-white" />
+          </div>
+          <div className="mb-4">
+            <label className="block text-sm text-gray-300">Duração do contrato (meses)</label>
+            <input type="number" value={contractMonths} onChange={e => setContractMonths(Number(e.target.value))} className="w-full mt-1 p-2 rounded bg-gray-700 text-white" />
+          </div>
+          <div className="mb-4">
+            <label className="block text-sm text-gray-300">Projeção de preço por ano (5 anos)</label>
+            <div className="grid grid-cols-5 gap-2 mt-2">
+              {projectedPriceByYear.map((p, i) => (
+                <input key={i} type="number" step="0.001" value={p} onChange={e => {
+                  const c = [...projectedPriceByYear]; c[i] = Number(e.target.value); setProjectedPriceByYear(c);
+                }} className="p-2 rounded bg-gray-700 text-white text-sm" />
+              ))}
+            </div>
+          </div>
+          <div className="mb-4">
+            <label className="block text-sm text-gray-300">Inflação projetada (5 anos)</label>
+            <div className="grid grid-cols-5 gap-2 mt-2">
+              {inflationByYear.map((p, i) => (
+                <input key={i} type="number" step="0.001" value={p} onChange={e => {
+                  const c = [...inflationByYear]; c[i] = Number(e.target.value); setInflationByYear(c);
+                }} className="p-2 rounded bg-gray-700 text-white text-sm" />
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm text-gray-300">Consumo mensal (kWh)</label>
+            <div className="grid grid-cols-3 gap-2 mt-2">
+              {monthlyConsumption.map((m, idx) => (
+                <div key={idx} className="flex flex-col">
+                  <label className="text-xs text-gray-400">{monthNames[idx]}</label>
+                  <input type="number" step="1" value={m} onChange={e => updateMonthly(idx, Number(e.target.value))} className="p-2 rounded bg-gray-700 text-white text-sm" />
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        <section className="col-span-1 lg:col-span-2 bg-gray-800 p-4 rounded-lg shadow">
+          <h2 className="text-lg font-medium mb-4">Resultados & KPIs</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            <div className="bg-gray-700 p-3 rounded">
+              <div className="text-sm text-gray-300">Consumo anual (kWh)</div>
+              <div className="text-2xl font-semibold">{totalAnnualConsumption}</div>
+            </div>
+            <div className="bg-gray-700 p-3 rounded">
+              <div className="text-sm text-gray-300">Melhor mês para comprar</div>
+              <div className="text-2xl font-semibold">{monthNames[best.buyMonth]}</div>
+              <div className="text-sm text-green-300">Economia estimada: R$ {best.savings.toFixed(2)}</div>
+            </div>
+            <div className="bg-gray-700 p-3 rounded">
+              <div className="text-sm text-gray-300">Risco</div>
+              <div className="text-2xl font-semibold">{risk.label}</div>
+              <div className="text-sm text-gray-400">Score: {risk.riskScore}</div>
+            </div>
+          </div>
+
+          <div className="mb-4">
+            <h3 className="text-sm text-gray-300 mb-2">Breakeven e Economia</h3>
+            <div style={{ width: "100%", height: 300 }} className="bg-gray-900 p-2 rounded">
+              <ResponsiveContainer width="100%" height={280}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#2d3748" />
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip />
+                  <Line type="monotone" dataKey="breakeven" stroke="#60a5fa" strokeWidth={2} />
+                  <Line type="monotone" dataKey="savings" stroke="#34d399" strokeWidth={2} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<EnergyBreakevenSimulator />);
+
+  </script>
+</body>
+</html>
